@@ -34,11 +34,13 @@ from detectron2.utils.events import (
 from detectron2.modeling.test_time_augmentation import GeneralizedRCNNWithTTA
 from detectron2.data.dataset_mapper import DatasetMapper
 from detectron2.data.build import build_detection_train_loader
+from detectron2.data.datasets import register_coco_instances
 
 from centernet.config import add_centernet_config
 from centernet.data.custom_build_augmentation import build_custom_augmentation
 
 logger = logging.getLogger("detectron2")
+
 
 def do_test(cfg, model):
     results = OrderedDict()
@@ -57,7 +59,7 @@ def do_test(cfg, model):
             evaluator = COCOEvaluator(dataset_name, cfg, True, output_folder)
         else:
             assert 0, evaluator_type
-            
+
         results[dataset_name] = inference_on_dataset(
             model, data_loader, evaluator)
         if comm.is_main_process():
@@ -67,6 +69,7 @@ def do_test(cfg, model):
     if len(results) == 1:
         results = list(results.values())[0]
     return results
+
 
 def do_train(cfg, model, resume=False):
     model.train()
@@ -78,8 +81,8 @@ def do_train(cfg, model, resume=False):
     )
 
     start_iter = (
-        checkpointer.resume_or_load(
-            cfg.MODEL.WEIGHTS, resume=resume,
+            checkpointer.resume_or_load(
+                cfg.MODEL.WEIGHTS, resume=resume,
             ).get("iteration", -1) + 1
     )
     if cfg.SOLVER.RESET_ITER:
@@ -101,15 +104,13 @@ def do_train(cfg, model, resume=False):
         else []
     )
 
-
     mapper = DatasetMapper(cfg, True) if cfg.INPUT.CUSTOM_AUG == '' else \
         DatasetMapper(cfg, True, augmentations=build_custom_augmentation(cfg, True))
     if cfg.DATALOADER.SAMPLER_TRAIN in ['TrainingSampler', 'RepeatFactorTrainingSampler']:
         data_loader = build_detection_train_loader(cfg, mapper=mapper)
     else:
-        from centernet.data.custom_dataset_dataloader import  build_custom_train_loader
+        from centernet.data.custom_dataset_dataloader import build_custom_train_loader
         data_loader = build_custom_train_loader(cfg, mapper=mapper)
-
 
     logger.info("Starting training from iteration {}".format(start_iter))
     with EventStorage(start_iter) as storage:
@@ -129,7 +130,7 @@ def do_train(cfg, model, resume=False):
             assert torch.isfinite(losses).all(), loss_dict
 
             loss_dict_reduced = {k: v.item() \
-                for k, v in comm.reduce_dict(loss_dict).items()}
+                                 for k, v in comm.reduce_dict(loss_dict).items()}
             losses_reduced = sum(loss for loss in loss_dict_reduced.values())
             if comm.is_main_process():
                 storage.put_scalars(
@@ -148,15 +149,15 @@ def do_train(cfg, model, resume=False):
             scheduler.step()
 
             if (
-                cfg.TEST.EVAL_PERIOD > 0
-                and iteration % cfg.TEST.EVAL_PERIOD == 0
-                and iteration != max_iter
+                    cfg.TEST.EVAL_PERIOD > 0
+                    and iteration % cfg.TEST.EVAL_PERIOD == 0
+                    and iteration != max_iter
             ):
                 do_test(cfg, model)
                 comm.synchronize()
 
             if iteration - start_iter > 5 and \
-                (iteration % 20 == 0 or iteration == max_iter):
+                    (iteration % 20 == 0 or iteration == max_iter):
                 for writer in writers:
                     writer.write()
             periodic_checkpointer.step(iteration)
@@ -166,14 +167,24 @@ def do_train(cfg, model, resume=False):
             "Total training time: {}".format(
                 str(datetime.timedelta(seconds=int(total_time)))))
 
+
 def setup(args):
     """
     Create configs and perform basic setups.
     """
+    register_coco_instances("my_dataset_train", {},
+                            "/data/huminghe/data/doors/railway_doors_all_merged_0513.json",
+                            "/data/huminghe/data/doors/Images")
+    register_coco_instances("my_dataset_val", {},
+                            "/data/huminghe/data/doors/railway_doors_all_merged_0513.json",
+                            "/data/huminghe/data/doors/Images")
+
     cfg = get_cfg()
     add_centernet_config(cfg)
     cfg.merge_from_file(args.config_file)
     cfg.merge_from_list(args.opts)
+    cfg.DATASETS.TRAIN = ("my_dataset_train",)
+    cfg.DATASETS.TEST = ()
     if '/auto' in cfg.OUTPUT_DIR:
         file_name = os.path.basename(args.config_file)[:-5]
         cfg.OUTPUT_DIR = cfg.OUTPUT_DIR.replace('/auto', '/{}'.format(file_name))
@@ -185,6 +196,11 @@ def setup(args):
 
 def main(args):
     cfg = setup(args)
+
+    print("solver ims per batch")
+    print(str(cfg.SOLVER.IMS_PER_BATCH), flush=True)
+    print("solver base lr")
+    print(str(cfg.SOLVER.BASE_LR), flush=True)
 
     model = build_model(cfg)
     logger.info("Model:\n{}".format(model))

@@ -19,13 +19,22 @@ WINDOW_NAME = "CenterNet2 detections"
 from detectron2.utils.video_visualizer import VideoVisualizer
 from detectron2.utils.visualizer import ColorMode, Visualizer
 from detectron2.data import MetadataCatalog
+from detectron2.data.datasets import register_coco_instances
 
 def setup_cfg(args):
     # load config from file and command-line arguments
+
+    # register_coco_instances("my_dataset_train", {},
+    #                         "/data/huminghe/projects/detectron2/datasets/coco/annotations/instances_train2017.json",
+    #                         "/data/huminghe/projects/detectron2/datasets/coco/train2017")
+
     cfg = get_cfg()
     add_centernet_config(cfg)
     cfg.merge_from_file(args.config_file)
     cfg.merge_from_list(args.opts)
+
+    # cfg.DATASETS.TRAIN = ("my_dataset_train",)
+    # cfg.DATASETS.TEST = ("my_dataset_train",)
     # Set score_threshold for builtin models
     cfg.MODEL.RETINANET.SCORE_THRESH_TEST = args.confidence_threshold
     cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = args.confidence_threshold
